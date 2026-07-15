@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Wumpus World 🐉</title>
+  <style>
+    body {
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: linear-gradient(270deg, #1a1a1a, #3a3a3a, #1a1a1a);
+      background-size: 600% 600%;
+      color: white;
+      font-family: 'Arial', sans-serif;
+      text-align: center;
+      transition: background 0.8s ease;
+      overflow: hidden;
+    }
+
+    canvas {
+      background: #d2b48c;
+      display: block;
+      margin: 20px auto;
+      border: 5px solid #444;
+      border-radius: 15px;
+      box-shadow: 0 0 20px #fff;
+    }
+
+    #hud {
+      margin-top: 10px;
+      font-size: 22px;
+      text-shadow: 0 0 5px #fff;
+    }
+
+    h1 {
+      text-shadow: 0 0 10px #ff0, 0 0 20px #ff0;
+    }
+
+    #instructions {
+      max-width: 500px;
+      margin-top: 10px;
+      line-height: 1.5;
+    }
+
+    #overlay {
+      position: absolute;
+      top:0;
+      left:0;
+      width:100%;
+      height:100%;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: yellow;
+      font-size: 40px;
+      font-weight: bold;
+      text-shadow: 0 0 10px #fff;
+      display: none;
+      z-index: 100;
+    }
+  </style>
+</head>
+<body>
+  <h1>Wumpus World 🐉</h1>
+  <canvas id="gameCanvas" width="500" height="500"></canvas>
+  <div id="hud">Score: 25</div>
+  <div id="instructions">
+    <p>Use <strong>Arrow Keys</strong> to move your player (blue).<br>
+    Find the gold (hidden) and reach the exit (green) without falling into pits (black) or getting eaten by the Wumpus (red).<br>
+    Feel the breeze (light blue) near pits and stench (dark green) near Wumpus!</p>
+  </div>
+  <div id="overlay"></div>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    const GRID_SIZE = 5;
+    const CELL_SIZE = canvas.width / GRID_SIZE;
+
+    let player = { row: GRID_SIZE - 1, col: 0 };
+    let score = 25;
+    let gameOver = false;
+    let win = false;
+    let gotGold = false;
+
+    // Particle system for background effects
+    const particles = [];
+    const PARTICLE_COUNT = 50;
+    for(let i=0;i<PARTICLE_COUNT;i++){
+      particles.push({x:Math.random()*window.innerWidth, y:Math.random()*window.innerHeight, r: Math.random()*2+1, dx: (Math.random()-0.5)*1.5, dy: (Math.random()-0.5)*1.5});
+    }
+
+    // World generation
+    const positions = [];
+    for (let r = 0; r < GRID_SIZE; r++)
+      for (let c = 0; c < GRID_SIZE; c++)
+        positions.push([r, c]);
+
+    positions.splice(positions.findIndex(p => p[0]===GRID_SIZE-1 && p[1]===0),1); // start
+    positions.splice(positions.findIndex(p => p[0]===0 && p[1]===GRID_SIZE-1),1); // exit
+
+    const randChoice = arr => arr[Math.floor(Math.random()*arr.length)];
+    let wumpus = randChoice(positions); positions.splice(positions.indexOf(wumpus),1);
+    let gold = randChoice(positions); positions.splice(positions.indexOf(gold),1);
+    let pits = [];
+    for(let i=0;i<3;i++){
+      let pit = randChoice(positions);
+      pits.push(pit);
+      positions.splice(positions.indexOf(pit),1);
+    }
+
+    function drawGrid(){
+      for(let r=0;r<GRID_SIZE;r++){
+        for(let c=0;c<GRID_SIZE;c++){
+          ctx.fillStyle = (r+c)%2===0 ? "#d2b48c" : "#a67c52";
+          ctx.fillRect(c*CELL_SIZE,r*CELL_SIZE,CELL_SIZE,CELL_SIZE);
+        }
+      }
+      // exit
+      ctx.fillStyle="green";
+      ctx.shadowColor="lime";
+      ctx.shadowBlur=15;
+      ctx.fillRect((GRID_SIZE-1)*CELL_SIZE,0,CELL_SIZE,CELL_SIZE);
+      ctx.shadowBlur=0;
+
+      // draw gold **only if player has found it**
+      if(gotGold){
+        ctx.fillStyle="yellow";
+        ctx.shadowColor="gold";
+        ctx.shadowBlur=20;
+        ctx.beginPath();
+        ctx.arc(gold[1]*CELL_SIZE + CELL_SIZE/2, gold[0]*CELL_SIZE + CELL_SIZE/2, CELL_SIZE/4, 0, Math.PI*2);
+        ctx.fill();
+        ctx.shadowBlur=0;
+      }
+    }
+
+    function drawPlayer(){
+      ctx.fillStyle="blue";
+      ctx.shadowColor="cyan";
+      ctx.shadowBlur=15;
+      ctx.beginPath();
+      ctx.arc(player.col*CELL_SIZE + CELL_SIZE/2, player.row*CELL_SIZE + CELL_SIZE/2, CELL_SIZE/3,0,Math.PI*2);
+      ctx.fill();
+      ctx.shadowBlur=0;
+    }
+
+    function drawParticles(){
+      for(let p of particles){
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+        ctx.fill();
+      }
+    }
+
+    function updateParticles(bgType){
+      let color = "rgba(255,255,255,0.1)";
+      if(bgType==="breeze") color="rgba(173,216,230,0.5)";
+      else if(bgType==="stench") color="rgba(0,100,0,0.5)";
+
+      for(let p of particles){
+        p.x+=p.dx; p.y+=p.dy;
+        if(p.x>window.innerWidth) p.x=0;
+        if(p.x<0) p.x=window.innerWidth;
+        if(p.y>window.innerHeight) p.y=0;
+        if(p.y<0) p.y=window.innerHeight;
+      }
+
+      ctx.fillStyle=color;
+      drawParticles();
+    }
+
+    function isAdjacent(a,b){
+      return Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1])===1;
+    }
+
+    function updateBackground(){
+      if(gameOver) return;
+      if(isAdjacent([player.row,player.col], wumpus)) {
+        document.body.style.background="linear-gradient(270deg, #0b3d0b, #1f5c1f, #0b3d0b)";
+        return "stench";
+      }
+      else if(pits.some(p=>isAdjacent([player.row,player.col],p))){
+        document.body.style.background="linear-gradient(270deg, #1e90ff, #87cefa, #1e90ff)";
+        return "breeze";
+      }
+      else{
+        document.body.style.background="linear-gradient(270deg, #1a1a1a, #3a3a3a, #1a1a1a)";
+        return "default";
+      }
+    }
+
+    function checkGame(){
+      if(gameOver) return;
+      let messages=[];
+
+      if(isAdjacent([player.row,player.col], wumpus)) messages.push("You smell a stench 👃");
+      if(pits.some(p=>isAdjacent([player.row,player.col],p))) messages.push("You feel a breeze 🌬️");
+      if(player.row===gold[0] && player.col===gold[1]) {
+        gotGold=true;
+        messages.push("You see glitter ✨");
+      }
+
+      if(pits.some(p=>p[0]===player.row && p[1]===player.col)){
+        messages=["You fell into a pit! 💀"];
+        gameOver=true; showOverlay("You fell into a pit! 💀");
+      }
+      else if(player.row===wumpus[0] && player.col===wumpus[1]){
+        messages=["The Wumpus got you! 🐉💀"];
+        gameOver=true; showOverlay("The Wumpus got you! 🐉💀");
+      }
+
+      if(gotGold && player.row===0 && player.col===GRID_SIZE-1){
+        messages=["You escaped with the gold! 🏆"];
+        gameOver=true; win=true; showOverlay("You escaped with the gold! 🏆");
+      }
+
+      if(score<=0 && !gameOver){
+        messages=["You ran out of moves! ⏳"];
+        gameOver=true; showOverlay("You ran out of moves! ⏳");
+      }
+
+      updateHUD(messages.join(" | "));
+    }
+
+    function showOverlay(text){
+      const overlay=document.getElementById("overlay");
+      overlay.innerText=text;
+      overlay.style.display="flex";
+    }
+
+    function updateHUD(message=""){ document.getElementById("hud").innerText=`Score: ${score} ${message}`;}
+
+    function gameLoop(){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      drawGrid();
+      drawPlayer();
+      const bgType=updateBackground();
+      updateParticles(bgType);
+    }
+
+    document.addEventListener("keydown", e=>{
+      if(gameOver) return;
+      if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) score--;
+      if(e.key==="ArrowUp" && player.row>0) player.row--;
+      if(e.key==="ArrowDown" && player.row<GRID_SIZE-1) player.row++;
+      if(e.key==="ArrowLeft" && player.col>0) player.col--;
+      if(e.key==="ArrowRight" && player.col<GRID_SIZE-1) player.col++;
+      checkGame();
+      gameLoop();
+    });
+
+    checkGame(); gameLoop();
+    setInterval(gameLoop,50); // animate particles continuously
+  </script>
+</body>
+</html>
